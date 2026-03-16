@@ -889,14 +889,7 @@ const S = {
   after: 10,
   phrase: 'Hey Chat, Clip it',
   clips: [],
-  bufChunks: [],
-  headerChunk: null,      // FIX: always keep the very first chunk (WebM header)
-  capturingAfter: false,
-  afterCount: 0,
-  beforeSnap: [],
-  afterCollected: [],
   pendingURL: null,
-  pendingBlob: null,
   pendingSecs: 20,
   clipsToday: 0,
   isStarted: false,
@@ -912,41 +905,52 @@ const PRESETS = [
 ];
 
 /* ============================================================
-   AUDIO ENGINE
+   AUDIO ENGINE — AudioContext + WAV circular buffer
+   No MediaRecorder chunks = no timestamp issues = clean playback
+   on all mobile browsers.
    ============================================================ */
-let mStream = null;
-let mRec = null;
-let srec = null;
+let mStream     = null;
+let audioCtx    = null;
+let scriptNode  = null;
+let srec        = null;
+
+// Ring buffer: stores raw Float32 PCM samples at the native sample rate.
+// Size = (before + after + 4 seconds headroom) seconds worth of samples.
+let ringBuf     = null;   // Float32Array
+let ringSize    = 0;      // total samples the ring holds
+let writePos    = 0;      // current write head (wraps around)
+let sampleRate  = 44100;  // updated after AudioContext opens
+let isCapturing = false;  // true while collecting "after" samples
+let captureCollected = 0; // samples collected so far in "after" phase
+let triggerPos  = 0;      // writePos at the moment the trigger fired
+
+function allocRing() {
+  const seconds = S.before + S.after + 4;
+  ringSize = Math.ceil(sampleRate * seconds);
+  ringBuf  = new Float32Array(ringSize);
+  writePos = 0;
+}
 
 async function initAudio() {
   if (S.isStarted) return;
   try {
-    mStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    const mime = ['audio/webm;codecs=opus','audio/webm','audio/ogg','audio/mp4']
-      .find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e) { return false; } }) || '';
+    mStream  = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    sampleRate = audioCtx.sampleRate;
+    allocRing();
 
-    mRec = new MediaRecorder(mStream, mime ? { mimeType: mime } : {});
+    const source = audioCtx.createMediaStreamSource(mStream);
 
-    mRec.ondataavailable = e => {
-      if (!e.data || e.data.size < 100) return;
-      // FIX: first chunk = WebM header (codec init). Save it separately,
-      // always prepend to assembled clips so mobile Chrome can decode them.
-      if (!S.headerChunk) { S.headerChunk = e.data; return; }
-      if (S.capturingAfter) {
-        S.afterCollected.push(e.data);
-        S.afterCount++;
-        setBuf(100);
-        if (S.afterCount >= S.after) finalizeCapture();
-      } else {
-        S.bufChunks.push(e.data);
-        if (S.bufChunks.length > S.before + 2) S.bufChunks.shift();
-        setBuf(Math.min((S.bufChunks.length / S.before) * 100, 100));
-      }
-    };
+    // ScriptProcessor gives us raw PCM frames — works on all mobile browsers.
+    // 4096 = buffer size (small enough for low latency, big enough to be stable)
+    scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    scriptNode.onaudioprocess = onAudioFrame;
+    source.connect(scriptNode);
+    scriptNode.connect(audioCtx.destination);
 
-    mRec.start(1000);
     S.isStarted = true;
     setStatus('Listening', true);
+    updateBufUI();
     startSR();
   } catch(err) {
     setStatus('Mic needed', false);
@@ -954,13 +958,41 @@ async function initAudio() {
   }
 }
 
+function onAudioFrame(e) {
+  const input = e.inputBuffer.getChannelData(0);
+  for (let i = 0; i < input.length; i++) {
+    ringBuf[writePos % ringSize] = input[i];
+    writePos++;
+  }
+
+  if (isCapturing) {
+    captureCollected += input.length;
+    const needed = Math.ceil(sampleRate * S.after);
+    const pct = Math.min(captureCollected / needed, 1);
+    setBuf(Math.round(pct * 100));
+    if (captureCollected >= needed) finalizeCapture();
+  } else {
+    updateBufUI();
+  }
+}
+
+function updateBufUI() {
+  const samplesBuffered = Math.min(writePos, Math.ceil(sampleRate * S.before));
+  const pct = samplesBuffered / Math.ceil(sampleRate * S.before);
+  setBuf(Math.round(pct * 100));
+}
+
 function doTrigger() {
-  if (S.capturingAfter) return;
+  if (isCapturing) return;
   if (!S.isPro && S.clipsToday >= FREE_LIMIT) { openPaywall(); return; }
-  S.beforeSnap = [...S.bufChunks];
-  S.afterCollected = [];
-  S.afterCount = 0;
-  S.capturingAfter = true;
+  if (!S.isStarted) { toast('⚠️ Tap the mic first to start listening'); return; }
+
+  // Snap the write head position — everything from (writePos - before*sampleRate)
+  // to (writePos + after*sampleRate) will become the clip.
+  triggerPos       = writePos;
+  captureCollected = 0;
+  isCapturing      = true;
+
   showCapAnim();
   setStatus('Recording…', true);
   document.getElementById('mic-core').classList.add('recording');
@@ -968,26 +1000,58 @@ function doTrigger() {
 }
 
 function finalizeCapture() {
-  S.capturingAfter = false;
+  isCapturing = false;
   document.getElementById('mic-core').classList.remove('recording');
-  // FIX: prepend headerChunk so the blob has a valid WebM header on mobile
-  const allChunks = [
-    ...(S.headerChunk ? [S.headerChunk] : []),
-    ...S.beforeSnap,
-    ...S.afterCollected
-  ];
-  if (allChunks.length === 0) { toast('⚠️ No audio captured'); setStatus('Listening', true); return; }
-  const mime = (mRec && mRec.mimeType) ? mRec.mimeType : 'audio/webm';
-  const blob = new Blob(allChunks, { type: mime });
-  S.pendingBlob = blob;
-  S.pendingURL = URL.createObjectURL(blob);
-  S.pendingSecs = S.beforeSnap.length + S.afterCollected.length;
   setStatus('Listening', true);
+
+  // Extract the clip from the ring buffer as a contiguous Float32Array
+  const beforeSamples = Math.min(Math.ceil(sampleRate * S.before), triggerPos);
+  const afterSamples  = Math.ceil(sampleRate * S.after);
+  const totalSamples  = beforeSamples + afterSamples;
+  const clip          = new Float32Array(totalSamples);
+
+  const startPos = triggerPos - beforeSamples;
+  for (let i = 0; i < totalSamples; i++) {
+    const idx = (startPos + i) % ringSize;
+    clip[i] = ringBuf[idx < 0 ? idx + ringSize : idx];
+  }
+
+  // Encode to WAV — universally playable, no timestamp issues
+  const wavBlob = encodeWAV(clip, sampleRate);
+  S.pendingURL  = URL.createObjectURL(wavBlob);
+  S.pendingSecs = Math.round(totalSamples / sampleRate);
   showNotif();
 }
 
+/* ---- WAV encoder ---- */
+function encodeWAV(samples, sr) {
+  const buf    = new ArrayBuffer(44 + samples.length * 2);
+  const view   = new DataView(buf);
+  const write  = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+  const s16    = Math.round; // clamp helper
+  write(0,  'RIFF');
+  view.setUint32(4,  36 + samples.length * 2, true);
+  write(8,  'WAVE');
+  write(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1,  true);  // PCM
+  view.setUint16(22, 1,  true);  // mono
+  view.setUint32(24, sr, true);
+  view.setUint32(28, sr * 2, true);
+  view.setUint16(32, 2,  true);
+  view.setUint16(34, 16, true);
+  write(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
 function manualClip() {
-  if (!S.isStarted) { initAudio().then(() => setTimeout(doTrigger, 600)); return; }
+  if (!S.isStarted) { initAudio().then(() => setTimeout(doTrigger, 800)); return; }
   doTrigger();
 }
 
@@ -1296,13 +1360,13 @@ function savePhrase() {
 document.getElementById('before-range').addEventListener('input', function() {
   S.before = +this.value;
   document.getElementById('before-disp').textContent = this.value + 's';
-  document.getElementById('buf-val').textContent = '0s / ' + S.before + 's';
-  document.getElementById('buf-fill').style.width = '0%';
-  S.bufChunks = [];
+  if (S.isStarted) allocRing();
+  updateBufUI();
 });
 document.getElementById('after-range').addEventListener('input', function() {
   S.after = +this.value;
   document.getElementById('after-disp').textContent = this.value + 's';
+  if (S.isStarted) allocRing();
 });
 
 /* ============================================================
