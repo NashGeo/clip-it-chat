@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0a0a10">
+<meta name="theme-color" content="#0f0a06">
 <title>Clip it, Chat</title>
 
 <!-- PWA -->
@@ -21,26 +21,26 @@
    DESIGN TOKENS
    ============================================================ */
 :root {
-  --bg: #0a0a10;
-  --bg2: #12121a;
-  --bg3: #1a1a24;
-  --surface: #1e1e2c;
-  --surface2: #252536;
+  --bg: #0f0a06;
+  --bg2: #16100a;
+  --bg3: #1e1610;
+  --surface: #241b12;
+  --surface2: #2c2218;
   --border: rgba(255,255,255,0.08);
   --border2: rgba(255,255,255,0.14);
 
-  --purple: #7b6ef6;
-  --purple-dim: rgba(123,110,246,0.18);
-  --purple-bright: #9d93ff;
-  --teal: #2ed8a8;
-  --teal-dim: rgba(46,216,168,0.15);
+  --purple: #f97316;
+  --purple-dim: rgba(249,115,22,0.18);
+  --purple-bright: #fb923c;
+  --teal: #fbbf24;
+  --teal-dim: rgba(251,191,36,0.15);
   --amber: #f0a832;
   --amber-dim: rgba(240,168,50,0.15);
   --red: #f05252;
 
-  --text: #f0edf8;
-  --muted: #8a87a0;
-  --hint: #4a4860;
+  --text: #fff8f0;
+  --muted: #a8906e;
+  --hint: #5c4a30;
 
   --r: 14px;
   --r-sm: 10px;
@@ -210,11 +210,11 @@ audio { width: 100%; }
   z-index: 2;
   cursor: pointer;
   transition: transform 0.12s, box-shadow 0.2s;
-  box-shadow: 0 0 0 0 rgba(123,110,246,0.4);
+  box-shadow: 0 0 0 0 rgba(249,115,22,0.4);
 }
 .mic-core:active { transform: scale(0.9); }
 .mic-core.recording { animation: micPulse 0.6s ease-in-out infinite; }
-@keyframes micPulse { 0%,100%{box-shadow:0 0 0 0 rgba(123,110,246,0.5)} 50%{box-shadow:0 0 0 18px rgba(123,110,246,0)} }
+@keyframes micPulse { 0%,100%{box-shadow:0 0 0 0 rgba(249,115,22,0.5)} 50%{box-shadow:0 0 0 18px rgba(249,115,22,0)} }
 
 .mic-core svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -252,7 +252,7 @@ audio { width: 100%; }
   letter-spacing: -0.2px;
   flex-shrink: 0;
   transition: transform 0.1s, opacity 0.1s;
-  box-shadow: 0 4px 24px rgba(123,110,246,0.3);
+  box-shadow: 0 4px 24px rgba(249,115,22,0.3);
 }
 .clip-now-btn:active { transform: scale(0.97); opacity: 0.9; }
 
@@ -314,7 +314,7 @@ audio { width: 100%; }
    ============================================================ */
 .plan-banner {
   background: var(--purple-dim);
-  border: 0.5px solid rgba(123,110,246,0.3);
+  border: 0.5px solid rgba(249,115,22,0.3);
   border-radius: var(--r-lg);
   padding: 16px;
   margin-bottom: 14px;
@@ -389,7 +389,7 @@ input[type=range].srange::-webkit-slider-thumb {
   width: 18px; height: 18px; border-radius: 50%;
   background: var(--purple);
   cursor: pointer;
-  box-shadow: 0 0 0 3px rgba(123,110,246,0.25);
+  box-shadow: 0 0 0 3px rgba(249,115,22,0.25);
 }
 input[type=range].srange:disabled { opacity: 0.35; cursor: not-allowed; }
 input[type=range].srange:disabled::-webkit-slider-thumb { cursor: not-allowed; }
@@ -539,7 +539,7 @@ input[type=range].srange:disabled::-webkit-slider-thumb { cursor: not-allowed; }
 .paywall-glow {
   position: absolute; top: -60px; left: 50%; transform: translateX(-50%);
   width: 200px; height: 120px;
-  background: radial-gradient(ellipse, rgba(123,110,246,0.4) 0%, transparent 70%);
+  background: radial-gradient(ellipse, rgba(249,115,22,0.4) 0%, transparent 70%);
   pointer-events: none;
 }
 .paywall-title { font-size: 22px; font-weight: 700; text-align: center; letter-spacing: -0.5px; margin-bottom: 3px; }
@@ -562,7 +562,7 @@ input[type=range].srange:disabled::-webkit-slider-thumb { cursor: not-allowed; }
   background: var(--purple); border-radius: var(--r-lg);
   color: #fff; font-size: 15px; font-weight: 700;
   text-align: center; cursor: pointer; margin-bottom: 10px;
-  box-shadow: 0 4px 24px rgba(123,110,246,0.35);
+  box-shadow: 0 4px 24px rgba(249,115,22,0.35);
   transition: opacity 0.15s, transform 0.1s;
 }
 .paywall-upgrade:active { opacity: 0.85; transform: scale(0.98); }
@@ -628,7 +628,7 @@ input[type=range].srange:disabled::-webkit-slider-thumb { cursor: not-allowed; }
   border: 0.5px solid var(--border); border-radius: 20px;
   font-size: 11px; font-weight: 500; color: var(--text); cursor: pointer;
 }
-.notif-action.primary { background: var(--purple-dim); border-color: rgba(123,110,246,0.3); color: var(--purple-bright); }
+.notif-action.primary { background: var(--purple-dim); border-color: rgba(249,115,22,0.3); color: var(--purple-bright); }
 
 /* ============================================================
    AUDIO ELEMENT STYLE
@@ -1114,7 +1114,7 @@ function openClipModal() {
     const b = document.createElement('div');
     b.className = 'wv-bar';
     b.style.height = (18 + Math.random() * 64) + '%';
-    b.style.background = i >= trigPos ? '#7b6ef6' : '#4a4870';
+    b.style.background = i >= trigPos ? '#f97316' : '#4a4870';
     wf.appendChild(b);
   }
 
