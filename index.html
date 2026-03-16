@@ -507,6 +507,25 @@ input[type=range].srange:disabled::-webkit-slider-thumb { cursor: not-allowed; }
 .modal-input:focus { border-color: var(--purple); }
 .modal-input::placeholder { color: var(--hint); }
 
+/* Custom audio player */
+.custom-player {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg3); border-radius: var(--r-sm);
+  padding: 10px 14px; margin-bottom: 14px;
+  border: 0.5px solid var(--border);
+}
+.cp-btn {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--purple); border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: transform 0.1s, opacity 0.1s;
+}
+.cp-btn:active { transform: scale(0.92); opacity: 0.85; }
+.cp-btn svg { width: 16px; height: 16px; fill: #fff; }
+.cp-progress { flex: 1; }
+.cp-track { height: 3px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+.cp-fill { height: 100%; background: var(--purple); border-radius: 2px; width: 0%; transition: width 0.1s linear; }
+.cp-times { display: flex; justify-content: space-between; font-size: 10px; font-family: var(--mono); color: var(--hint); margin-top: 4px; }
 #playback-wrap { margin-bottom: 14px; }
 
 .btn-row { display: flex; gap: 8px; }
@@ -934,7 +953,16 @@ function allocRing() {
 async function initAudio() {
   if (S.isStarted) return;
   try {
-    mStream  = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    mStream  = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl:  false,
+        sampleRate:       44100,
+        channelCount:     1,
+      },
+      video: false
+    });
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     sampleRate = audioCtx.sampleRate;
     allocRing();
@@ -1154,12 +1182,18 @@ function hideNotif() {
 /* ============================================================
    CLIP MODAL
    ============================================================ */
+// Custom player state
+let cpAudioCtx = null, cpSource = null, cpBuffer = null;
+let cpPlaying = false, cpStartTime = 0, cpOffset = 0, cpRafId = null;
+
 function openClipModal() {
   hideNotif();
   if (!S.pendingURL) { toast('⚠️ No pending clip'); return; }
-  const bSecs = Math.min(S.beforeSnap.length, S.before);
-  const aSecs = Math.min(S.afterCollected.length, S.after);
-  document.getElementById('m-sub').textContent = `Just now · ${S.pendingSecs} seconds`;
+  stopPlayer();
+
+  const bSecs = Math.min(S.before, S.pendingSecs - S.after);
+  const aSecs = S.after;
+  document.getElementById('m-sub').textContent = `Just now · ${S.pendingSecs}s`;
   document.getElementById('wf-left').textContent = `−${bSecs}s`;
   document.getElementById('wf-right').textContent = `+${aSecs}s`;
   document.getElementById('clip-name-input').value = '';
@@ -1170,30 +1204,98 @@ function openClipModal() {
   const bars = 22;
   const trigPos = Math.max(1, Math.round((bSecs / S.pendingSecs) * bars));
   for (let i = 0; i < bars; i++) {
-    if (i === trigPos) {
-      const tl = document.createElement('div');
-      tl.className = 'wv-trigger';
-      wf.appendChild(tl);
-    }
-    const b = document.createElement('div');
-    b.className = 'wv-bar';
+    if (i === trigPos) { const tl = document.createElement('div'); tl.className = 'wv-trigger'; wf.appendChild(tl); }
+    const b = document.createElement('div'); b.className = 'wv-bar';
     b.style.height = (18 + Math.random() * 64) + '%';
-    b.style.background = i >= trigPos ? '#f97316' : '#4a4870';
+    b.style.background = i >= trigPos ? '#f97316' : '#5c4a30';
     wf.appendChild(b);
   }
 
-  // Playback
+  // Custom player (no native <audio> — avoids all mobile autoplay/scrub bugs)
   const pw = document.getElementById('playback-wrap');
-  pw.innerHTML = S.pendingURL
-    ? `<audio controls src="${S.pendingURL}" style="margin-bottom:14px"></audio>`
-    : '';
+  pw.innerHTML = `
+    <div class="custom-player">
+      <button class="cp-btn" id="cp-playbtn" onclick="togglePlay()">
+        <svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+      </button>
+      <div class="cp-progress">
+        <div class="cp-track"><div class="cp-fill" id="cp-fill"></div></div>
+        <div class="cp-times"><span id="cp-cur">0:00</span><span id="cp-dur">${fmtTime(S.pendingSecs)}</span></div>
+      </div>
+    </div>`;
+
+  // Decode WAV into AudioBuffer for reliable playback
+  fetch(S.pendingURL).then(r => r.arrayBuffer()).then(ab => {
+    cpAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    cpAudioCtx.decodeAudioData(ab, buf => { cpBuffer = buf; });
+  });
 
   const m = document.getElementById('clip-modal');
   m.style.display = 'flex';
   requestAnimationFrame(() => m.classList.add('open'));
 }
 
+function fmtTime(s) {
+  return Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0');
+}
+
+function togglePlay() {
+  if (!cpBuffer) { toast('⚠️ Audio still loading...'); return; }
+  if (cpPlaying) { pausePlayer(); } else { startPlayer(); }
+}
+
+function startPlayer() {
+  if (!cpBuffer || !cpAudioCtx) return;
+  cpSource = cpAudioCtx.createBufferSource();
+  cpSource.buffer = cpBuffer;
+  cpSource.connect(cpAudioCtx.destination);
+  cpSource.start(0, cpOffset);
+  cpSource.onended = () => { if (cpPlaying) { cpPlaying = false; cpOffset = 0; updatePlayerBtn(false); cancelAnimationFrame(cpRafId); document.getElementById('cp-fill').style.width = '0%'; document.getElementById('cp-cur').textContent = '0:00'; } };
+  cpPlaying = true;
+  cpStartTime = cpAudioCtx.currentTime - cpOffset;
+  updatePlayerBtn(true);
+  tickPlayer();
+}
+
+function pausePlayer() {
+  if (!cpSource) return;
+  cpOffset = cpAudioCtx.currentTime - cpStartTime;
+  cpSource.stop();
+  cpPlaying = false;
+  updatePlayerBtn(false);
+  cancelAnimationFrame(cpRafId);
+}
+
+function stopPlayer() {
+  try { if (cpSource) cpSource.stop(); } catch(e){}
+  try { if (cpAudioCtx) cpAudioCtx.close(); } catch(e){}
+  cpSource = null; cpBuffer = null; cpAudioCtx = null;
+  cpPlaying = false; cpOffset = 0;
+  cancelAnimationFrame(cpRafId);
+}
+
+function tickPlayer() {
+  if (!cpPlaying || !cpAudioCtx) return;
+  const elapsed = cpAudioCtx.currentTime - cpStartTime;
+  const dur = cpBuffer ? cpBuffer.duration : S.pendingSecs;
+  const pct = Math.min(elapsed / dur * 100, 100);
+  const fill = document.getElementById('cp-fill');
+  const cur  = document.getElementById('cp-cur');
+  if (fill) fill.style.width = pct + '%';
+  if (cur)  cur.textContent = fmtTime(elapsed);
+  cpRafId = requestAnimationFrame(tickPlayer);
+}
+
+function updatePlayerBtn(playing) {
+  const btn = document.getElementById('cp-playbtn');
+  if (!btn) return;
+  btn.innerHTML = playing
+    ? '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
+    : '<svg viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>';
+}
+
 function closeClipModal() {
+  stopPlayer();
   const m = document.getElementById('clip-modal');
   m.classList.remove('open');
   setTimeout(() => { m.style.display = 'none'; }, 420);
