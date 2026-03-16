@@ -1,4 +1,4 @@
-const CACHE = 'clipit-v1';
+const CACHE = 'clipit-v2';
 const ASSETS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
